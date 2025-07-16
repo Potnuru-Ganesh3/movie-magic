@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Select Seats | Movie Magic</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .seat { padding: 8px; margin: 4px; background: #ddd; border-radius: 5px; text-align: center; cursor: pointer; }
+    .selected { background-color: #3498db; color: white; }
+    .grid-label { font-weight: bold; text-align: center; }
+    .seat-map-container { overflow-x: auto; }
+    #seat-selection-grid {
+      display: grid;
+      gap: 5px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header class="top-bar">
+    <h1>🎬 Movie Magic</h1>
+    <nav id="main-nav"></nav>
+  </header>
+
+  <main>
+    <section class="ticket-form-section">
+      <div class="ticket-form-header">
+        <h2>Select Your Seats</h2>
+        <div class="ticket-info-display">
+          <span id="display-movie-title"></span> |
+          <span id="display-theater-name"></span> |
+          <span id="display-showtime"></span>
+        </div>
+      </div>
+
+      <div class="theater-screen">SCREEN</div>
+
+      <div class="seat-map-container">
+        <div id="seat-selection-grid"></div>
+      </div>
+
+      <div class="booking-summary">
+        <p>Selected Seats: <strong id="selected-seats-display">None</strong></p>
+        <p>Total Cost: <strong id="total-cost-display">₹0</strong></p>
+        <p id="seat-timer-msg"></p>
+      </div>
+
+      <div class="payment-button-container">
+        <button id="continue-payment-btn" class="btn" disabled>Continue to Payment</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const MOVIES_DB = {
+      'ee': { id: 'ee', title: 'Eternal Echoes' },
+      'tlf': { id: 'tlf', title: 'The Last Frontier' },
+      'wid': { id: 'wid', title: 'Whispers in the Dark' },
+      'scl': { id: 'scl', title: 'Stars Collide' },
+      'gsc': { id: 'gsc', title: 'Guardian of the Sacred Scroll' }
+    };
+
+    const ROWS = 'ABCDEFGHIJ'.split('');
+    const COLS = ['1','2','3','4','5','6','7','8','9','10'];
+    const DEFAULT_SEAT_PRICE = 150;
+    let selectedSeats = [];
+    let lockTimer;
+
+    let currentMovieId, currentTheater, currentShowtime, currentLocation;
+
+    const seatGrid = document.getElementById('seat-selection-grid');
+    const displayMovieTitle = document.getElementById('display-movie-title');
+    const displayTheaterName = document.getElementById('display-theater-name');
+    const displayShowtime = document.getElementById('display-showtime');
+    const selectedSeatsDisplay = document.getElementById('selected-seats-display');
+    const totalCostDisplay = document.getElementById('total-cost-display');
+    const continuePaymentBtn = document.getElementById('continue-payment-btn');
+    const timerMsg = document.getElementById('seat-timer-msg');
+
+    const isLoggedIn = localStorage.getItem("isLoggedIn") === "true";
+
+    function updateNavBar() {
+      const nav = document.getElementById("main-nav");
+      if (isLoggedIn) {
+        nav.innerHTML = `
+          <a href="home.html">Home</a>
+          <a href="tickets.html">My Tickets</a>
+          <a href="#" id="logout-link">Logout</a>`;
+        document.getElementById('logout-link').onclick = (e) => {
+          e.preventDefault();
+          localStorage.setItem('isLoggedIn', 'false');
+          alert('Logged out successfully.');
+          location.href = 'home.html';
+        };
+      } else {
+        nav.innerHTML = `
+          <a href="home.html">Home</a>
+          <a href="login.html">Login</a>
+          <a href="register.html">Register</a>`;
+      }
+    }
+
+    function getUrlParams() {
+      const p = new URLSearchParams(location.search);
+      return {
+        movieId: p.get("movieId"),
+        location: p.get("location"),
+        showtime: p.get("showtime"),
+        theater: p.get("theater"),
+      };
+    }
+
+    function renderSeatMap() {
+      seatGrid.innerHTML = '';
+      seatGrid.style.gridTemplateColumns = `40px repeat(${COLS.length}, 1fr)`;
+
+      // top header
+      seatGrid.appendChild(Object.assign(document.createElement('div'), {className: 'grid-label empty-cell'}));
+      COLS.forEach(col => {
+        const label = document.createElement('div');
+        label.className = 'grid-label';
+        label.textContent = col;
+        seatGrid.appendChild(label);
+      });
+
+      for (const row of ROWS) {
+        const rowLabel = document.createElement('div');
+        rowLabel.className = 'grid-label';
+        rowLabel.textContent = row;
+        seatGrid.appendChild(rowLabel);
+
+        for (const col of COLS) {
+          const seatId = `${row}${col}`;
+          const div = document.createElement('div');
+          div.className = 'seat';
+          div.id = `seat-${seatId}`;
+          div.textContent = seatId;
+
+          if (selectedSeats.includes(seatId)) {
+            div.classList.add('selected');
+          }
+
+          div.onclick = () => toggleSeat(seatId);
+          seatGrid.appendChild(div);
+        }
+      }
+
+      updateBookingSummary();
+    }
+
+    function updateBookingSummary() {
+      selectedSeatsDisplay.textContent = selectedSeats.length ? selectedSeats.join(', ') : 'None';
+      const cost = selectedSeats.length * DEFAULT_SEAT_PRICE;
+      totalCostDisplay.textContent = `₹${cost}`;
+      continuePaymentBtn.disabled = selectedSeats.length === 0;
+    }
+
+    function toggleSeat(seatId) {
+      const index = selectedSeats.indexOf(seatId);
+      const div = document.getElementById(`seat-${seatId}`);
+
+      if (index !== -1) {
+        selectedSeats.splice(index, 1);
+        div.classList.remove('selected');
+      } else {
+        selectedSeats.push(seatId);
+        div.classList.add('selected');
+        startLockTimer();
+      }
+
+      updateBookingSummary();
+    }
+
+    function startLockTimer(duration = 300) {
+      let time = duration;
+      clearInterval(lockTimer);
+      lockTimer = setInterval(() => {
+        const m = Math.floor(time / 60);
+        const s = time % 60;
+        timerMsg.textContent = `🕒 Seats held for ${m}:${s.toString().padStart(2, '0')}`;
+        if (--time <= 0) {
+          clearInterval(lockTimer);
+          timerMsg.textContent = `⚠️ Seat hold expired. Please reselect.`;
+          selectedSeats = [];
+          renderSeatMap();
+        }
+      }, 1000);
+    }
+
+    continuePaymentBtn.onclick = () => {
+      if (selectedSeats.length === 0) return;
+      const cost = selectedSeats.length * DEFAULT_SEAT_PRICE;
+      location.href = `payment.html?movieId=${currentMovieId}&location=${currentLocation}&showtime=${currentShowtime}&theater=${currentTheater}&selectedSeats=${selectedSeats.join(',')}&totalCost=${cost}`;
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      updateNavBar();
+      const params = getUrlParams();
+      currentMovieId = params.movieId;
+      currentLocation = params.location;
+      currentShowtime = params.showtime;
+      currentTheater = params.theater;
+
+      if (!currentMovieId || !currentLocation || !currentShowtime || !currentTheater) {
+        alert('Missing booking parameters. Redirecting to home page.');
+        window.location.href = 'home.html';
+        return;
+      }
+
+      displayMovieTitle.textContent = MOVIES_DB[currentMovieId]?.title || 'Movie';
+      displayTheaterName.textContent = currentTheater;
+      displayShowtime.textContent = currentShowtime;
+
+      renderSeatMap(); // only render, no backend
+    });
+  </script>
+</body>
+</html>
